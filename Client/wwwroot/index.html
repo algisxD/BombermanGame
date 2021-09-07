@@ -1,0 +1,69 @@
+﻿<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Bomberman</title>
+    <base href="/" />
+    <link href="css/bootstrap/bootstrap.min.css" rel="stylesheet" />
+    <link href="css/app.css" rel="stylesheet" />
+</head>
+
+<body>
+    <app>Loading...</app>
+
+    <div id="blazor-error-ui">
+        An unhandled error has occurred.
+        <a href="" class="reload">Reload</a>
+        <a class="dismiss">🗙</a>
+    </div>
+    <script src="_framework/blazor.webassembly.js"></script>
+    <script src="_content/Blazor.Extensions.Canvas/blazor.extensions.canvas.js"></script>
+    <script>navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' })</script>
+    <script>
+        window.anim = {
+            start: function (instance) {
+                return window.requestAnimationFrame(function (timestamp) { anim.callback(instance, timestamp); });
+            },
+
+            callback: function (instance, timestamp) {
+                canvas = document.getElementsByTagName("canvas")[0];
+                instance.invokeMethod('eventRequestAnimationFrame', timestamp, canvas.width, canvas.height);
+
+                var callbackId = window.requestAnimationFrame(function (timestamp) { anim.callback(instance, timestamp); });
+            },
+
+            stop: function (callbackId) {
+                window.cancelAnimationFrame(callbackId);
+            },
+
+            loadTexture: function (filename) {
+                canvas = document.getElementsByTagName("canvas")[0];
+                var gl = canvas.getContext("webgl");
+
+                var image = new Image();
+                image.src = filename;
+                image.addEventListener('load', function () {
+                    // Now that the image has loaded make copy it to the texture.
+                    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+                    gl.generateMipmap(gl.TEXTURE_2D);
+                });
+            }
+        };
+
+        function hookInputEvents(dotNetObject) {
+            document.onkeydown = function (e) {
+                e = e || window.event;
+                dotNetObject.invokeMethod('OnKeyDown', e.key);
+            };
+
+            document.onkeyup = function (e) {
+                e = e || window.event;
+                dotNetObject.invokeMethod('OnKeyUp', e.key);
+            };
+        };
+    </script>
+</body>
+
+</html>

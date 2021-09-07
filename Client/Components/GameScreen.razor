@@ -1,0 +1,217 @@
+﻿@using Blazor.Extensions
+@using Blazor.Extensions.Canvas
+@using Blazor.Extensions.Canvas.Canvas2D
+@inject IJSRuntime JsRuntime;
+
+<BECanvas @ref="canvasReference" Height="@World.RES_X" Width="@World.RES_Y"></BECanvas>
+
+@code {
+    Blazor.Extensions.BECanvasComponent canvasReference;
+
+    private GameRenderer renderer;
+
+    // Currently pressed keys
+    private HashSet<string> heldKeys = new HashSet<string>();
+    private InputManager movementInput = new InputManager();
+
+    // Time of last game frame
+    private float lastFrameTimestamp;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Hook up any needed js events and load textures
+            var dotNetReference = DotNetObjectReference.Create(this);
+            await JsRuntime.InvokeVoidAsync("anim.loadTexture", "assets/spritesheet.png");
+
+
+            /// Hook animationloop
+            await JsRuntime.InvokeVoidAsync("anim.start", dotNetReference);
+
+            /// Hook MouseEvent on the client
+            await JsRuntime.InvokeVoidAsync("hookInputEvents", dotNetReference);
+
+            await base.OnInitializedAsync();
+
+            renderer = new GameRenderer(canvasReference);
+            await renderer.Initialize();
+        }
+    }
+
+    [JSInvokable("eventRequestAnimationFrame")]
+    public async void MainLoop(float timeStamp, int canvasX, int canvasY)
+    {
+        // Game Update
+        if (GameObjectTransport.Instance != null && GameObjectTransport.Instance.PlayerObject != null)
+        {
+            GameUpdate((timeStamp - lastFrameTimestamp) / 1000);
+        }
+
+        lastFrameTimestamp = timeStamp;
+
+        // Render
+        if (renderer != null)
+        {
+            renderer.canvasWidth = canvasX;
+            renderer.canvasHeight = canvasY;
+
+            await renderer.RenderFrame();
+        }
+    }
+
+    private void GameUpdate(float deltaTime)
+    {
+        int count = 0;
+        Bomberman.Shared.Objects.OurPlayer player = GameObjectTransport.Instance.PlayerObject;
+        if (player.controlsEnabled)
+        {
+            UpdateMovement(deltaTime);
+            UpdateBombs(count);
+            if (count <= 5)
+                player.ChangeState();
+            else if (count > 5 && count <= 10)
+                player.ChangeState();
+            else if (count > 10 && count <= 15)
+                player.ChangeState();
+            else
+                count = 0;
+        }
+        else
+        {
+            player = GameObjectTransport.Instance.PlayerObject;
+        }
+    }
+
+    private void UpdateMovement(float deltaTime)
+    {
+        BombermanFacade facade = new BombermanFacade();
+
+        Vector2d moveAdd = new Vector2d(0, 0);
+
+        if (GetKeyHeld("w")) facade.addMove(0, -GameObject.PLAYER_MOVE_SPEED * deltaTime);
+        else if (GetKeyHeld("s")) facade.addMove(0, GameObject.PLAYER_MOVE_SPEED * deltaTime);
+        if (GetKeyHeld("a")) facade.addMove(-GameObject.PLAYER_MOVE_SPEED * deltaTime, 0);
+        else if (GetKeyHeld("d")) facade.addMove(GameObject.PLAYER_MOVE_SPEED * deltaTime, 0);
+
+        if (GetKeyHeld("w")) moveAdd = moveAdd.Add(new Vector2d(0, -GameObject.PLAYER_MOVE_SPEED * deltaTime));
+        else if (GetKeyHeld("s")) moveAdd = moveAdd.Add(new Vector2d(0, GameObject.PLAYER_MOVE_SPEED * deltaTime));
+        if (GetKeyHeld("a")) moveAdd = moveAdd.Add(new Vector2d(-GameObject.PLAYER_MOVE_SPEED * deltaTime, 0));
+        else if (GetKeyHeld("d")) moveAdd = moveAdd.Add(new Vector2d(GameObject.PLAYER_MOVE_SPEED * deltaTime, 0));
+
+        if (GetKeyHeld("u")) movementInput.UndoCommands();
+
+        if (moveAdd.IsZero())
+            return;
+
+        Vector2d movement = CheckCollision(moveAdd);
+
+        if (!movement.IsZero())
+        {
+            MoveCommand move = new MoveCommand(GameObjectTransport.Instance.PlayerObject, movement);
+            movementInput.ExecuteCommand(move);
+        }
+    }
+
+    private void UpdateBombs(int count)
+    {
+        BombCommand placeBomb;
+        Random rnd = new Random();
+        int strategyNumber;
+        if (GetKeyHeld("b"))
+        {
+            count++;
+            strategyNumber = rnd.Next(1, 4);
+            switch (strategyNumber)
+            {
+                case 1:
+                    placeBomb = new BombCommand(GameObjectTransport.Instance.PlayerObject, GameObjectTransport.Instance.GameState, new BombBuildStrategyA());
+                    placeBomb.Execute();
+                    break;
+                case 2:
+                    placeBomb = new BombCommand(GameObjectTransport.Instance.PlayerObject, GameObjectTransport.Instance.GameState, new BombBuildStrategyB());
+                    placeBomb.Execute();
+                    break;
+                case 3:
+                    placeBomb = new BombCommand(GameObjectTransport.Instance.PlayerObject, GameObjectTransport.Instance.GameState, new BombBuildStrategyC());
+                    placeBomb.Execute();
+                    break;
+            }
+
+        }
+
+    }
+
+    private Vector2d CheckCollision(Vector2d moveAdd)
+    {
+        // Check if player currently collides with anything
+        Bomberman.Shared.Objects.OurPlayer player = GameObjectTransport.Instance.PlayerObject;
+        bool currentlyOverlaps = false;
+
+        foreach (GameObject g in GameObjectTransport.Instance.GameState.gameObjects.Values)
+        {
+            if (g.Collider != player.Collider)
+            {
+                if (g.PhysicsOverlapsWith(player))
+                {
+                    currentlyOverlaps = true;
+                    break;
+                }
+            }
+        }
+
+        // If we are currenly overlapping, allow to move anyway, otherwise check for collision
+        Vector2d targetMove = new Vector2d(0, 0);
+
+        if (!currentlyOverlaps)
+        {
+            // Try to move as close as possible
+            for (double i = 0; i <= 1f; i += 0.2f)
+            {
+                bool overlaps = false;
+                Vector2d m = new Vector2d(moveAdd.x * i, moveAdd.y * i);
+                foreach (GameObject g in GameObjectTransport.Instance.GameState.gameObjects.Values)
+                {
+                    if (g.Collider != player.Collider)
+                    {
+                        if (g.PhysicsOverlapsWith(player.Collider, player.Position.Add(m)))
+                        {
+                            overlaps = true;
+                            break;
+                        }
+                    }
+                }
+                if (!overlaps)
+                {
+                    targetMove = m;
+                }
+            }
+
+        }
+
+        return targetMove;
+    }
+
+    [JSInvokable("OnKeyDown")]
+    public async void OnKeyDown(string key)
+    {
+        if (!heldKeys.Contains(key))
+        {
+            heldKeys.Add(key);
+        }
+    }
+
+    [JSInvokable("OnKeyUp")]
+    public async void OnKeyUp(string key)
+    {
+        if (heldKeys.Contains(key))
+        {
+            heldKeys.Remove(key);
+        }
+    }
+
+    public bool GetKeyHeld(string key)
+    {
+        return heldKeys.Contains(key);
+    }
+}

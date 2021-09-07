@@ -1,0 +1,107 @@
+﻿@page "/"
+@inject NavigationManager NavigationManager
+@inject HttpClient Http
+<h1>Welcome to BoMbErMaN</h1>
+<h3>Status: @(GameObjectTransport.Instance == null || GameObjectTransport.Instance.GameState == null ? ( isConnecting ? "Connecting..." : "Offline" ) : "Online")</h3>
+<hr />
+
+@if (GameObjectTransport.Instance == null || GameObjectTransport.Instance.GameState == null)
+{
+
+    // We are not in the game
+    @if (isConnecting)
+    {
+        <h4>We are getting you into the server...</h4>
+    }
+    else
+    {
+        <button @onclick="Connect">Connect</button>
+    }
+}
+else
+{
+    // We are in the game
+    <div class="row">
+        <h4>Connected as @GameObjectTransport.Instance.PlayerObject.UserID</h4>
+    </div>
+    <div class="container">
+        <div class="row">
+            <div style="margin-top: 0.5rem;" class="col-lg-6">
+                <Bomberman.Client.Components.GameScreen @ref="gameScreen"></Bomberman.Client.Components.GameScreen>
+            </div>
+            
+        </div>
+    </div>
+}
+<div class="col-lg-6">
+    <EditForm Model="@inputFieldValue" OnSubmit="OnSubmit">
+        <InputText id="name" @ref="inputText" @oninput="OnValueChanged" @onkeydown="@OnKeyDown" 
+                   ValueExpression="@( () => inputFieldValue.Message )"
+                   Value="@inputFieldValue.Message">
+        </InputText>
+        <button type="submit">Submit</button>
+    </EditForm>
+    <ul>
+        @if (GameObjectTransport.Instance.Chatroom != null)
+        {
+            @foreach (string item in GameObjectTransport.Instance.Chatroom.Chat)
+            {
+                <li>
+                    @item
+                </li>
+            }
+        }
+    </ul>
+</div>
+
+
+@code {
+    // If we are trying to connect to a game
+    private bool isConnecting = false;
+
+    // Screen that displays the game
+    private Bomberman.Client.Components.GameScreen gameScreen;
+
+    public InputFieldValue inputFieldValue = new InputFieldValue("");
+    private UndoRedoInputField chatBox;
+    private InputText inputText;
+    string text;
+
+    public void OnValueChanged(ChangeEventArgs args)
+    {
+        chatBox.SetStateForUndoRedo(args.Value.ToString());
+        text = args.Value.ToString();
+    }
+
+    void OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Control")
+        {
+            chatBox.TryUndo();
+        }
+
+        else if (e.Key == "Shift")
+        {
+            chatBox.TryRedo();
+        }
+    }
+
+    void OnSubmit()
+    {
+        GameObjectTransport.Instance.Send(text);
+        text = "";
+    }
+
+    async Task Connect()
+    {
+        isConnecting = true;
+
+        chatBox = new UndoRedoInputField(inputFieldValue);
+
+        GameObjectTransport.Instance.Initialize(NavigationManager, Http);
+
+        await GameObjectTransport.Instance.Connect();
+        isConnecting = false;
+        GameObjectTransport.Instance.OnReceivedMessage += () => StateHasChanged();
+    }
+}
